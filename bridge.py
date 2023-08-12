@@ -2,9 +2,10 @@
 
 import asyncio
 import logging
+import random
 import time
 from enum import IntEnum
-from typing import Tuple, Callable, Sequence, Dict, Optional
+from typing import Tuple, Callable, Sequence, Dict
 
 from fido2.pcsc import CtapPcscDevice, CtapDevice
 
@@ -20,6 +21,7 @@ class CommandType(IntEnum):
 
 
 def parse_initial_packet(buffer: bytes) -> Tuple[bytes, int, CommandType, bytes]:
+    """Parse an incoming initial packet."""
     print(f"Initial packet {buffer.hex()}")
     channel = buffer[1:5]
     cmd_byte = buffer[5] & 0x7F
@@ -30,16 +32,20 @@ def parse_initial_packet(buffer: bytes) -> Tuple[bytes, int, CommandType, bytes]
 
 
 def is_initial_packet(buffer: bytes) -> bool:
+    """Return true if packet is the start of a new sequence."""
     if buffer[5] & 0x80 == 0:
         return False
     return True
 
 
 def assign_channel_id() -> Sequence[int]:
-    return [0xCE, 0xCE, 0xCE, 0xCE]
+    """Create a new, random, channel ID."""
+    return [random.randint(0, 255), random.randint(0, 255),
+            random.randint(0, 255), random.randint(0, 255)]
 
 
 def handle_init(channel: bytes, buffer: bytes) -> Sequence[int]:
+    """Initialize or re-initialize a channel."""
     print(f"INIT on channel {channel}")
 
     new_channel = assign_channel_id()
@@ -58,7 +64,9 @@ def handle_init(channel: bytes, buffer: bytes) -> Sequence[int]:
                 ctap.capabilities,  # capabilities, from the underlying device
              ])
     else:
-        raise NotImplementedError()
+        channel_key = bytes(channel).hex()
+        del channels_to_state[channel_key]
+        del channels_to_devices[channel_key]
 
 
 channels_to_devices = {}
@@ -66,6 +74,7 @@ channels_to_state = {}
 
 
 def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
+    """Grab a PC/SC device from python-fido2."""
     channel_key = bytes(channel_id).hex()
 
     if channel_key not in channels_to_devices:
@@ -84,6 +93,7 @@ def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
 
 
 def handle_cbor(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
+    """Handling an incoming CBOR command."""
     ctap = get_pcsc_device(channel)
     print(f"Sending CBOR to device {ctap}: {buffer}")
     return [x for x in ctap.call(cmd=CommandType.CBOR, data=buffer)]
@@ -96,8 +106,7 @@ command_handlers: Dict[CommandType, Callable[[Sequence[int], bytes], Sequence[in
 
 
 def encode_response_packets(channel: Sequence[int], cmd: CommandType, data: Sequence[int]) -> Sequence[bytes]:
-    print(f"Overall response: {bytes(data).hex()}")
-
+    """Chunk response data to be delivered over USB."""
     offset_start = 0
     seq = 0
     responses = []
@@ -124,9 +133,11 @@ def encode_response_packets(channel: Sequence[int], cmd: CommandType, data: Sequ
 
 
 def finish_receiving(device: uhid.UHIDDevice, channel: Sequence[int]):
+    """When finished receiving packets, act on them."""
     channel_key = bytes(channel).hex()
     cmd, _, _, data = channels_to_state[channel_key]
     del channels_to_state[channel_key]
+    del channels_to_devices[channel_key]
 
     responses = []
     try:
@@ -140,11 +151,12 @@ def finish_receiving(device: uhid.UHIDDevice, channel: Sequence[int]):
 
 
 def parse_subsequent_packet(data: bytes) -> Tuple[Sequence[int], int, bytes]:
-    print(f"Subsequent packet: {data.hex()}")
+    """Parse a non-initial packet."""
     return data[1:5], data[5], bytes(data[6:])
 
 
 def process_hid_message(device: uhid.UHIDDevice, buffer: Sequence[int], report_type: uhid._ReportType):
+    """Core method: handle incoming HID messages."""
     recvd_bytes = bytes(buffer)
     print(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
 
@@ -171,10 +183,12 @@ def process_hid_message(device: uhid.UHIDDevice, buffer: Sequence[int], report_t
 
 
 def wrap_process_hid_with_device_obj(device: uhid.UHIDDevice) -> Callable:
+    """Pass a UHIDDevice to the process_hid_message method."""
     return lambda x, y: process_hid_message(device, x, y)
 
 
-async def run_device():
+async def run_device() -> None:
+    """Asynchronously run the event loop."""
     device = uhid.UHIDDevice(
         vid=0x9999, pid=0x9999, name='FIDO2 Virtual USB Device', report_descriptor=[
             # Generic mouse report descriptor
@@ -185,15 +199,15 @@ async def run_device():
                     0x15, 0x00,  # Logical min (0)
                     0x26, 0xFF, 0x00,  # Logical max (255)
                     0x75, 0x08,  # Report Size (8)
-                    0x95, 0x40,  # Report count (64)
+                    0x95, 0x40,  # Report count (64 bytes per packet)
                     0x81, 0x02,  # Input(HID_Data | HID_Absolute | HID_Variable)
                 0x09, 0x21,  # Usage (Data Out)
                     0x15, 0x00,  # Logical min (0)
                     0x26, 0xFF, 0x00,  # Logical max (255)
                     0x75, 0x08,  # Report Size (8)
-                    0x95, 0x40,  # Report count (64)
+                    0x95, 0x40,  # Report count (64 bytes per packet)
                     0x91, 0x02,  # Output(HID_Data | HID_Absolute | HID_Variable)
-            0xc0,        # End Collection                      54
+            0xc0,        # End Collection
         ],
         backend=uhid.AsyncioBlockingUHID,
         version=0,
