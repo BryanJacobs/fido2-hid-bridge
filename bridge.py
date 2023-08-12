@@ -12,8 +12,10 @@ from fido2.hid import CTAPHID
 
 import uhid
 
-BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
+channels_to_devices = {}
+channels_to_state = {}
 
+BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
 class CommandType(IntEnum):
     PING = 0x01
@@ -28,7 +30,7 @@ class CommandType(IntEnum):
 
 def parse_initial_packet(buffer: bytes) -> Tuple[bytes, int, CommandType, bytes]:
     """Parse an incoming initial packet."""
-    print(f"Initial packet {buffer.hex()}")
+    logging.debug(f"Initial packet {buffer.hex()}")
     channel = buffer[1:5]
     cmd_byte = buffer[5] & 0x7F
     lc = (int(buffer[6]) << 8) + buffer[7]
@@ -52,7 +54,7 @@ def assign_channel_id() -> Sequence[int]:
 
 def handle_init(channel: bytes, buffer: bytes) -> Sequence[int]:
     """Initialize or re-initialize a channel."""
-    print(f"INIT on channel {channel}")
+    logging.debug(f"INIT on channel {channel}")
 
     new_channel = assign_channel_id()
 
@@ -71,10 +73,6 @@ def handle_init(channel: bytes, buffer: bytes) -> Sequence[int]:
              ])
     else:
         handle_cancel(channel, b"")
-
-
-channels_to_devices = {}
-channels_to_state = {}
 
 
 def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
@@ -99,7 +97,7 @@ def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
 def handle_cbor(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
     """Handling an incoming CBOR command."""
     ctap = get_pcsc_device(channel)
-    print(f"Sending CBOR to device {ctap}: {buffer}")
+    logging.debug(f"Sending CBOR to device {ctap}: {buffer}")
     return [x for x in ctap.call(cmd=CommandType.CBOR, data=buffer)]
 
 
@@ -187,7 +185,7 @@ def finish_receiving(device: uhid.UHIDDevice, channel: Sequence[int]):
         response_body = command_handlers[cmd](channel, data)
         responses = encode_response_packets(channel, cmd, response_body)
     except Exception as e:
-        print(f"Error: {e}")
+        logging.warning(f"Error: {e}")
         responses += encode_response_packets(channel, CommandType.ERROR, [0x7F])
     for response in responses:
         device.send_input(response)
@@ -201,11 +199,11 @@ def parse_subsequent_packet(data: bytes) -> Tuple[Sequence[int], int, bytes]:
 def process_hid_message(device: uhid.UHIDDevice, buffer: Sequence[int], report_type: uhid._ReportType):
     """Core method: handle incoming HID messages."""
     recvd_bytes = bytes(buffer)
-    print(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
+    logging.debug(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
 
     if is_initial_packet(recvd_bytes):
         channel, lc, cmd, data = parse_initial_packet(recvd_bytes)
-        print(f"CMD {cmd.name} CHANNEL {channel} len {lc} (recvd {len(data)}) data {data.hex()}")
+        logging.debug(f"CMD {cmd.name} CHANNEL {channel} len {lc} (recvd {len(data)}) data {data.hex()}")
         channels_to_state[bytes(channel).hex()] = cmd, lc, -1, data
         if lc == len(data):
             # Complete receive
@@ -220,7 +218,7 @@ def process_hid_message(device: uhid.UHIDDevice, buffer: Sequence[int], report_t
         remaining = lc - len(existing_data)
         data = bytes([x for x in existing_data] + [x for x in new_data[:remaining]])
         channels_to_state[channel_key] = cmd, lc, seq, data
-        print(f"After receive, we have {len(data)} bytes out of {lc}")
+        logging.debug(f"After receive, we have {len(data)} bytes out of {lc}")
         if lc == len(data):
             finish_receiving(device, channel)
 
