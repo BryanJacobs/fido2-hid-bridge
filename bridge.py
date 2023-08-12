@@ -12,8 +12,7 @@ from fido2.hid import CTAPHID
 
 import uhid
 
-channels_to_devices = {}
-channels_to_state = {}
+SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 10
 
 BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
@@ -27,6 +26,20 @@ class CommandType(IntEnum):
     CANCEL = 0x11
     KEEPALIVE = 0x3B
     ERROR = 0x3F
+
+
+channels_to_devices: Dict[str, CtapDevice] = {}
+"""Mapping from channel strings to CTAP devices."""
+channels_to_state: Dict[str, Tuple[CommandType, int, int, bytes]] = {}
+"""
+Mapping from channel strings to receive buffer state.
+
+Each value consists of:
+1. The command type in use on the channel
+2. The total length of the incoming request
+3. The sequence number of the most recently received packet (-1 for initial)
+4. The accumulated data received on the channel
+"""
 
 
 def parse_initial_packet(buffer: bytes) -> Tuple[bytes, int, CommandType, bytes]:
@@ -82,7 +95,7 @@ def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
 
     if channel_key not in channels_to_devices:
         start_time = time.time()
-        while time.time() < start_time + 10:
+        while time.time() < start_time + SECONDS_TO_WAIT_FOR_AUTHENTICATOR:
             devices = list(CtapPcscDevice.list_devices())
             if len(devices) == 0:
                 time.sleep(0.1)
