@@ -148,7 +148,7 @@ class CTAPHIDDevice:
         return [randint(0, 255), randint(0, 255),
                 randint(0, 255), randint(0, 255)]
 
-    def handle_init(self, channel: bytes, buffer: bytes) -> Sequence[int]:
+    def handle_init(self, channel: bytes, buffer: bytes) -> Optional[Sequence[int]]:
         """Initialize or re-initialize a channel."""
         logging.debug(f"INIT on channel {channel}")
 
@@ -268,7 +268,7 @@ class CTAPHIDDevice:
         for response in responses:
             self.device.send_input(response)
 
-    def finish_receiving(self, channel: Sequence[int]):
+    def finish_receiving(self, channel: Sequence[int]) -> None:
         """When finished receiving packets, act on them."""
         channel_key = self.get_channel_key(channel)
         cmd, _, _, data = self.channels_to_state[channel_key]
