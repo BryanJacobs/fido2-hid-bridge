@@ -1,0 +1,13 @@
+[Unit]
+Description=Fido2 to HID bridge
+After=auditd.service syslog.target network.target local-fs.target
+
+[Service]
+WorkingDirectory=/opt/fido2-hid-bridge
+ExecStart=/opt/fido2-hid-bridge/.venv/bin/python bridge.py
+Type=simple
+Restart=on-failure
+RestartSec=60s
+
+[Install]
+WantedBy=multi-user.target
