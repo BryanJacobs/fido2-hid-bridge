@@ -1,6 +1,7 @@
 [Unit]
 Description=Fido2 to HID bridge
-After=auditd.service syslog.target network.target local-fs.target
+After=auditd.service syslog.target network.target local-fs.target pcscd.service
+Requires=pcscd.service
 
 [Service]
 WorkingDirectory=/opt/fido2-hid-bridge
