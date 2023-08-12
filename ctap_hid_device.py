@@ -7,7 +7,7 @@ from typing import Optional, Callable, Sequence, Dict, Tuple
 from uhid import UHIDDevice, _ReportType, AsyncioBlockingUHID, Bus
 from fido2.pcsc import CtapDevice, CTAPHID, CtapError, CtapPcscDevice
 
-SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 3
+SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 10
 """How long, in seconds, to poll for a USB authenticator before giving up."""
 VID = 0x9999
 """USB vendor ID."""
