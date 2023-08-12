@@ -8,6 +8,7 @@ from enum import IntEnum
 from typing import Tuple, Callable, Sequence, Dict
 
 from fido2.pcsc import CtapPcscDevice, CtapDevice
+from fido2.hid import CTAPHID
 
 import uhid
 
@@ -15,8 +16,13 @@ BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
 
 class CommandType(IntEnum):
+    PING = 0x01
+    MSG = 0x03
     INIT = 0x06
+    WINK = 0x08
     CBOR = 0x10
+    CANCEL = 0x11
+    KEEPALIVE = 0x3B
     ERROR = 0x3F
 
 
@@ -64,9 +70,7 @@ def handle_init(channel: bytes, buffer: bytes) -> Sequence[int]:
                 ctap.capabilities,  # capabilities, from the underlying device
              ])
     else:
-        channel_key = bytes(channel).hex()
-        del channels_to_state[channel_key]
-        del channels_to_devices[channel_key]
+        handle_cancel(channel, b"")
 
 
 channels_to_devices = {}
@@ -75,7 +79,7 @@ channels_to_state = {}
 
 def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
     """Grab a PC/SC device from python-fido2."""
-    channel_key = bytes(channel_id).hex()
+    channel_key = get_channel_key(channel_id)
 
     if channel_key not in channels_to_devices:
         start_time = time.time()
@@ -99,9 +103,45 @@ def handle_cbor(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
     return [x for x in ctap.call(cmd=CommandType.CBOR, data=buffer)]
 
 
+def handle_cancel(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
+    channel_key = get_channel_key(channel)
+    if channel_key in channels_to_state:
+        del channels_to_state[channel_key]
+    if channel_key in channels_to_devices:
+        del channels_to_devices[channel_key]
+    return []
+
+
+def handle_wink(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
+    """Do nothing; this can't be done over PC/SC."""
+    return []
+
+
+def handle_msg(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
+    """Process a U2F/CTAP1 message."""
+    device = get_pcsc_device(channel)
+    res = device.call(CTAPHID.MSG, buffer)
+    return [x for x in res]
+
+
+def handle_ping(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
+    """Handle an echo request."""
+    return [x for x in buffer]
+
+
+def handle_keepalive(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
+    """Placeholder: always returns that the device is processing."""
+    return [1]
+
+
 command_handlers: Dict[CommandType, Callable[[Sequence[int], bytes], Sequence[int]]] = {
+    CommandType.MSG: handle_msg,
     CommandType.INIT: handle_init,
-    CommandType.CBOR: handle_cbor
+    CommandType.CBOR: handle_cbor,
+    CommandType.CANCEL: handle_cancel,
+    CommandType.WINK: handle_wink,
+    CommandType.PING: handle_ping,
+    CommandType.KEEPALIVE: handle_keepalive
 }
 
 
@@ -132,12 +172,15 @@ def encode_response_packets(channel: Sequence[int], cmd: CommandType, data: Sequ
     return responses
 
 
+def get_channel_key(channel: Sequence[int]) -> str:
+    return bytes(channel).hex()
+
+
 def finish_receiving(device: uhid.UHIDDevice, channel: Sequence[int]):
     """When finished receiving packets, act on them."""
-    channel_key = bytes(channel).hex()
+    channel_key = get_channel_key(channel)
     cmd, _, _, data = channels_to_state[channel_key]
-    del channels_to_state[channel_key]
-    del channels_to_devices[channel_key]
+    handle_cancel(channel, b"")
 
     responses = []
     try:
@@ -169,10 +212,10 @@ def process_hid_message(device: uhid.UHIDDevice, buffer: Sequence[int], report_t
             finish_receiving(device, channel)
     else:
         channel, seq, new_data = parse_subsequent_packet(recvd_bytes)
-        channel_key = bytes(channel).hex()
+        channel_key = get_channel_key(channel)
         cmd, lc, prev_seq, existing_data = channels_to_state[channel_key]
         if seq != prev_seq + 1:
-            del channels_to_state[channel_key]
+            handle_cancel(channel, b"")
             raise ValueError(f"Incorrect sequence: got {seq}, expected {prev_seq + 1}")
         remaining = lc - len(existing_data)
         data = bytes([x for x in existing_data] + [x for x in new_data[:remaining]])
