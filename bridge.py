@@ -17,6 +17,7 @@ channels_to_state = {}
 
 BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
+
 class CommandType(IntEnum):
     PING = 0x01
     MSG = 0x03
@@ -254,7 +255,6 @@ async def run_device() -> None:
     """Asynchronously run the event loop."""
     device = uhid.UHIDDevice(
         vid=0x9999, pid=0x9999, name='FIDO2 Virtual USB Device', report_descriptor=[
-            # Generic mouse report descriptor
             0x06, 0xD0, 0xF1,  # Usage Page (FIDO)
             0x09, 0x01,  # Usage (CTAPHID)
             0xa1, 0x01,  # Collection (Application)
