@@ -7,7 +7,7 @@ import time
 from enum import IntEnum
 from typing import Tuple, Callable, Sequence, Dict
 
-from fido2.pcsc import CtapPcscDevice, CtapDevice
+from fido2.pcsc import CtapPcscDevice, CtapDevice, CtapError
 from fido2.hid import CTAPHID
 
 import uhid
@@ -89,6 +89,7 @@ def get_pcsc_device(channel_id: Sequence[int]) -> CtapDevice:
             device = devices[0]
             channels_to_devices[channel_key] = device
             return device
+        # TODO: return timeout (0x05) here
         raise ValueError("No PC/SC device found within a reasonable time!")
 
     return channels_to_devices[channel_key]
@@ -98,7 +99,12 @@ def handle_cbor(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
     """Handling an incoming CBOR command."""
     ctap = get_pcsc_device(channel)
     logging.debug(f"Sending CBOR to device {ctap}: {buffer}")
-    return [x for x in ctap.call(cmd=CommandType.CBOR, data=buffer)]
+    try:
+        res = ctap.call(cmd=CommandType.CBOR, data=buffer)
+        return [x for x in res]
+    except CtapError as e:
+        logging.info(f"Got CTAP error response from device: {e}")
+        return [e.code]
 
 
 def handle_cancel(channel: Sequence[int], buffer: bytes) -> Sequence[int]:
@@ -174,19 +180,30 @@ def get_channel_key(channel: Sequence[int]) -> str:
     return bytes(channel).hex()
 
 
+def send_error(device: uhid.UHIDDevice, channel: Sequence[int], error_type: int) -> None:
+    responses = encode_response_packets(channel, CommandType.ERROR, [error_type])
+    for response in responses:
+        device.send_input(response)
+
+
 def finish_receiving(device: uhid.UHIDDevice, channel: Sequence[int]):
     """When finished receiving packets, act on them."""
     channel_key = get_channel_key(channel)
     cmd, _, _, data = channels_to_state[channel_key]
     handle_cancel(channel, b"")
 
-    responses = []
     try:
-        response_body = command_handlers[cmd](channel, data)
-        responses = encode_response_packets(channel, cmd, response_body)
+        if cmd in command_handlers:
+            response_body = command_handlers[cmd](channel, data)
+            responses = encode_response_packets(channel, cmd, response_body)
+        else:
+            send_error(device, channel, 0x01)
+            return
     except Exception as e:
         logging.warning(f"Error: {e}")
-        responses += encode_response_packets(channel, CommandType.ERROR, [0x7F])
+        send_error(device, channel, 0x7F)
+        return
+
     for response in responses:
         device.send_input(response)
 
@@ -203,18 +220,23 @@ def process_hid_message(device: uhid.UHIDDevice, buffer: Sequence[int], report_t
 
     if is_initial_packet(recvd_bytes):
         channel, lc, cmd, data = parse_initial_packet(recvd_bytes)
-        logging.debug(f"CMD {cmd.name} CHANNEL {channel} len {lc} (recvd {len(data)}) data {data.hex()}")
-        channels_to_state[bytes(channel).hex()] = cmd, lc, -1, data
+        channel_key = get_channel_key(channel)
+        logging.debug(f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}")
+        channels_to_state[channel_key] = cmd, lc, -1, data
         if lc == len(data):
             # Complete receive
             finish_receiving(device, channel)
     else:
         channel, seq, new_data = parse_subsequent_packet(recvd_bytes)
         channel_key = get_channel_key(channel)
+        if channel_key not in channels_to_state:
+            send_error(device, channel, 0x0B)
+            return
         cmd, lc, prev_seq, existing_data = channels_to_state[channel_key]
         if seq != prev_seq + 1:
             handle_cancel(channel, b"")
-            raise ValueError(f"Incorrect sequence: got {seq}, expected {prev_seq + 1}")
+            send_error(device, channel, 0x04)
+            return
         remaining = lc - len(existing_data)
         data = bytes([x for x in existing_data] + [x for x in new_data[:remaining]])
         channels_to_state[channel_key] = cmd, lc, seq, data
