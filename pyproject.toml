@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "fido2-hid-bridge"
+version = "0.1.0"
+description = ""
+authors = ["Bryan Jacobs <b@q3q.us>"]
+readme = "README.md"
+packages = [{include = "fido2_hid_bridge"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+uhid = "^0.0.1"
+fido2 = {extras = ["pcsc"], version = "^1.1.2"}
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
