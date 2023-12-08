@@ -20,6 +20,7 @@ BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 
 class CommandType(IntEnum):
     """Catalog of CTAP-HID command type bytes."""
+
     PING = 0x01
     MSG = 0x03
     INIT = 0x06
@@ -30,8 +31,9 @@ class CommandType(IntEnum):
     ERROR = 0x3F
 
 
-def _wrap_call_with_device_obj(device: UHIDDevice,
-                               call: Callable[[UHIDDevice, Sequence[int], _ReportType], None]) -> Callable:
+def _wrap_call_with_device_obj(
+    device: UHIDDevice, call: Callable[[UHIDDevice, Sequence[int], _ReportType], None]
+) -> Callable:
     """Pass a UHIDDevice to a given callback."""
     return lambda x, y: call(device, x, y)
 
@@ -56,27 +58,48 @@ class CTAPHIDDevice:
 
     def __init__(self):
         self.device = UHIDDevice(
-            vid=VID, pid=PID, name='FIDO2 Virtual USB Device', report_descriptor=[
-                0x06, 0xD0, 0xF1,  # Usage Page (FIDO)
-                0x09, 0x01,  # Usage (CTAPHID)
-                0xa1, 0x01,  # Collection (Application)
-                0x09, 0x20,  # Usage (Data In)
-                0x15, 0x00,  # Logical min (0)
-                0x26, 0xFF, 0x00,  # Logical max (255)
-                0x75, 0x08,  # Report Size (8)
-                0x95, 0x40,  # Report count (64 bytes per packet)
-                0x81, 0x02,  # Input(HID_Data | HID_Absolute | HID_Variable)
-                0x09, 0x21,  # Usage (Data Out)
-                0x15, 0x00,  # Logical min (0)
-                0x26, 0xFF, 0x00,  # Logical max (255)
-                0x75, 0x08,  # Report Size (8)
-                0x95, 0x40,  # Report count (64 bytes per packet)
-                0x91, 0x02,  # Output(HID_Data | HID_Absolute | HID_Variable)
-                0xc0,        # End Collection
+            vid=VID,
+            pid=PID,
+            name="FIDO2 Virtual USB Device",
+            report_descriptor=[
+                0x06,
+                0xD0,
+                0xF1,  # Usage Page (FIDO)
+                0x09,
+                0x01,  # Usage (CTAPHID)
+                0xA1,
+                0x01,  # Collection (Application)
+                0x09,
+                0x20,  # Usage (Data In)
+                0x15,
+                0x00,  # Logical min (0)
+                0x26,
+                0xFF,
+                0x00,  # Logical max (255)
+                0x75,
+                0x08,  # Report Size (8)
+                0x95,
+                0x40,  # Report count (64 bytes per packet)
+                0x81,
+                0x02,  # Input(HID_Data | HID_Absolute | HID_Variable)
+                0x09,
+                0x21,  # Usage (Data Out)
+                0x15,
+                0x00,  # Logical min (0)
+                0x26,
+                0xFF,
+                0x00,  # Logical max (255)
+                0x75,
+                0x08,  # Report Size (8)
+                0x95,
+                0x40,  # Report count (64 bytes per packet)
+                0x91,
+                0x02,  # Output(HID_Data | HID_Absolute | HID_Variable)
+                0xC0,  # End Collection
             ],
             backend=AsyncioBlockingUHID,
             version=0,
-            bus=Bus.USB
+            bus=Bus.USB,
         )
 
         self.device.receive_output = self.process_hid_message
@@ -93,7 +116,9 @@ class CTAPHIDDevice:
             self.channels_to_devices = {}
             self.channels_to_state = {}
 
-    def process_hid_message(self, buffer: Sequence[int], report_type: _ReportType) -> None:
+    def process_hid_message(
+        self, buffer: Sequence[int], report_type: _ReportType
+    ) -> None:
         """Core method: handle incoming HID messages."""
         recvd_bytes = bytes(buffer)
         logging.debug(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
@@ -101,7 +126,9 @@ class CTAPHIDDevice:
         if self.is_initial_packet(recvd_bytes):
             channel, lc, cmd, data = self.parse_initial_packet(recvd_bytes)
             channel_key = self.get_channel_key(channel)
-            logging.debug(f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}")
+            logging.debug(
+                f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}"
+            )
             self.channels_to_state[channel_key] = cmd, lc, -1, data
             if lc == len(data):
                 # Complete receive
@@ -118,7 +145,7 @@ class CTAPHIDDevice:
                 self.send_error(channel, 0x04)
                 return
             remaining = lc - len(existing_data)
-            data = bytes([x for x in existing_data] + [x for x in new_data[:remaining]])
+            data = existing_data + new_data[:remaining]
             self.channels_to_state[channel_key] = cmd, lc, seq, data
             logging.debug(f"After receive, we have {len(data)} bytes out of {lc}")
             if lc == len(data):
@@ -127,13 +154,15 @@ class CTAPHIDDevice:
     async def start(self):
         await self.device.wait_for_start_asyncio()
 
-    def parse_initial_packet(self, buffer: bytes) -> Tuple[bytes, int, CommandType, bytes]:
+    def parse_initial_packet(
+        self, buffer: bytes
+    ) -> Tuple[bytes, int, CommandType, bytes]:
         """Parse an incoming initial packet."""
         logging.debug(f"Initial packet {buffer.hex()}")
         channel = buffer[1:5]
         cmd_byte = buffer[5] & 0x7F
         lc = (int(buffer[6]) << 8) + buffer[7]
-        data = buffer[8:8+lc]
+        data = buffer[8 : 8 + lc]
         cmd = CommandType(cmd_byte)
         return channel, lc, cmd, data
 
@@ -145,30 +174,32 @@ class CTAPHIDDevice:
 
     def assign_channel_id(self) -> Sequence[int]:
         """Create a new, random, channel ID."""
-        return [randint(0, 255), randint(0, 255),
-                randint(0, 255), randint(0, 255)]
+        return [randint(0, 255), randint(0, 255), randint(0, 255), randint(0, 255)]
 
-    def handle_init(self, channel: bytes, buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_init(self, channel: bytes, buffer: bytes) -> Optional[bytes]:
         """Initialize or re-initialize a channel."""
         logging.debug(f"INIT on channel {channel}")
 
-        new_channel = self.assign_channel_id()
-
-        ctap = self.get_pcsc_device(new_channel)
-        if ctap is None:
-            return None
-
         if channel == BROADCAST_CHANNEL:
             assert len(buffer) == 8
-            return ([x for x in buffer] +
-                    new_channel +
-                    [
-                        0x02,  # protocol version
-                        0x01,  # device version major
-                        0x00,  # device version minor
-                        0x00,  # device version build/point
-                        ctap.capabilities,  # capabilities, from the underlying device
-                    ])
+
+            new_channel = self.assign_channel_id()
+
+            ctap = self.get_pcsc_device(new_channel)
+            if ctap is None:
+                return None
+
+            return bytes(
+                [x for x in buffer]
+                + [x for x in new_channel]
+                + [
+                    0x02,  # protocol version
+                    0x01,  # device version major
+                    0x00,  # device version minor
+                    0x00,  # device version build/point
+                    ctap.capabilities,  # capabilities, from the underlying device
+                ]
+            )
         else:
             self.handle_cancel(channel, b"")
 
@@ -193,66 +224,79 @@ class CTAPHIDDevice:
 
         return self.channels_to_devices[channel_key]
 
-    def handle_cbor(self, channel: Sequence[int], buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_cbor(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
         """Handling an incoming CBOR command."""
         ctap = self.get_pcsc_device(channel)
         if ctap is None:
             return None
-        logging.debug(f"Sending CBOR to device {ctap}: {buffer}")
+        logging.debug(f"Sending CBOR to device {ctap}: {buffer.hex()}")
         try:
             res = ctap.call(cmd=CommandType.CBOR, data=buffer)
-            return [x for x in res]
+            return res
         except CtapError as e:
             logging.info(f"Got CTAP error response from device: {e}")
-            return [e.code]
+            return bytes([e.code])
 
-    def handle_cancel(self, channel: Sequence[int], buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_cancel(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
         channel_key = self.get_channel_key(channel)
         if channel_key in self.channels_to_state:
             del self.channels_to_state[channel_key]
         if channel_key in self.channels_to_devices:
             del self.channels_to_devices[channel_key]
-        return []
+        return bytes()
 
-    def handle_wink(channel: Sequence[int], buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_wink(channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
         """Do nothing; this can't be done over PC/SC."""
-        return []
+        return bytes()
 
-    def handle_msg(self, channel: Sequence[int], buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_msg(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
         """Process a U2F/CTAP1 message."""
         device = self.get_pcsc_device(channel)
         if device is None:
             return None
         res = device.call(CTAPHID.MSG, buffer)
-        return [x for x in res]
+        return res
 
-    def handle_ping(self, channel: Sequence[int], buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_ping(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
         """Handle an echo request."""
-        return [x for x in buffer]
+        return buffer
 
-    def handle_keepalive(self, channel: Sequence[int], buffer: bytes) -> Optional[Sequence[int]]:
+    def handle_keepalive(
+        self, channel: Sequence[int], buffer: bytes
+    ) -> Optional[bytes]:
         """Placeholder: always returns that the device is processing."""
-        return [1]
+        return bytes([1])
 
-    def encode_response_packets(self, channel: Sequence[int], cmd: CommandType, data: Sequence[int]) -> Sequence[bytes]:
+    def encode_response_packets(
+        self,
+        channel: Sequence[int],
+        cmd: CommandType,
+        data: bytes,
+        packet_size: int = 64,
+    ) -> Sequence[bytes]:
         """Chunk response data to be delivered over USB."""
         offset_start = 0
         seq = 0
         responses = []
         while offset_start < len(data):
             if seq == 0:
-                capacity = 64 - 7
-                chunk = data[offset_start:offset_start + capacity]
+                capacity = packet_size - 7
+                chunk = data[offset_start : (offset_start + capacity)]
                 data_len_upper = len(data) >> 8
                 data_len_lower = len(data) % 256
-                response = [x for x in channel] + [cmd | 0x80, data_len_upper, data_len_lower] + chunk
+                response = (
+                    bytes(channel)
+                    + bytes([cmd | 0x80, data_len_upper, data_len_lower])
+                    + chunk
+                )
             else:
-                capacity = 64 - 5
-                chunk = data[offset_start:offset_start + capacity]
-                response = [x for x in channel] + [seq - 1] + chunk
+                capacity = packet_size - 5
+                chunk = data[offset_start : (offset_start + capacity)]
+                response = bytes(channel) + bytes([seq - 1]) + chunk
 
-            while len(response) < 64:
-                response.append(0x00)
+            padding_byte_count = packet_size - len(response)
+            if padding_byte_count > 0:
+                response = response + bytes([0x00] * padding_byte_count)
 
             responses.append(bytes(response))
             offset_start += capacity
@@ -264,7 +308,9 @@ class CTAPHIDDevice:
         return bytes(channel).hex()
 
     def send_error(self, channel: Sequence[int], error_type: int) -> None:
-        responses = self.encode_response_packets(channel, CommandType.ERROR, [error_type])
+        responses = self.encode_response_packets(
+            channel, CommandType.ERROR, bytes([error_type])
+        )
         for response in responses:
             self.device.send_input(response)
 
@@ -293,6 +339,6 @@ class CTAPHIDDevice:
         for response in responses:
             self.device.send_input(response)
 
-    def parse_subsequent_packet(self, data: bytes) -> Tuple[Sequence[int], int, bytes]:
+    def parse_subsequent_packet(self, data: bytes) -> Tuple[bytes, int, bytes]:
         """Parse a non-initial packet."""
-        return data[1:5], data[5], bytes(data[6:])
+        return data[1:5], data[5], data[6:]
