@@ -2,9 +2,10 @@ import logging
 import time
 from enum import IntEnum
 from random import randint
-from typing import Optional, Callable, Sequence, Dict, Tuple
+from typing import Optional, Callable, Dict, Tuple, List
 
 from uhid import UHIDDevice, _ReportType, AsyncioBlockingUHID, Bus
+import fido2
 from fido2.pcsc import CtapDevice, CTAPHID, CtapError, CtapPcscDevice
 
 SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 10
@@ -32,7 +33,7 @@ class CommandType(IntEnum):
 
 
 def _wrap_call_with_device_obj(
-    device: UHIDDevice, call: Callable[[UHIDDevice, Sequence[int], _ReportType], None]
+    device: UHIDDevice, call: Callable[[UHIDDevice, List[int], _ReportType], None]
 ) -> Callable:
     """Pass a UHIDDevice to a given callback."""
     return lambda x, y: call(device, x, y)
@@ -41,7 +42,7 @@ def _wrap_call_with_device_obj(
 class CTAPHIDDevice:
     device: UHIDDevice
     """Underlying UHID device."""
-    channels_to_devices: Dict[str, CtapDevice] = {}
+    chosen_device: Optional[CtapDevice] = None
     """Mapping from channel strings to CTAP devices."""
     channels_to_state: Dict[str, Tuple[CommandType, int, int, bytes]] = {}
     """
@@ -113,12 +114,9 @@ class CTAPHIDDevice:
         self.reference_count -= 1
         if self.reference_count == 0:
             # Clear all state
-            self.channels_to_devices = {}
             self.channels_to_state = {}
 
-    def process_hid_message(
-        self, buffer: Sequence[int], report_type: _ReportType
-    ) -> None:
+    def process_hid_message(self, buffer: List[int], report_type: _ReportType) -> None:
         """Core method: handle incoming HID messages."""
         recvd_bytes = bytes(buffer)
         logging.debug(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
@@ -172,7 +170,7 @@ class CTAPHIDDevice:
             return False
         return True
 
-    def assign_channel_id(self) -> Sequence[int]:
+    def assign_channel_id(self) -> List[int]:
         """Create a new, random, channel ID."""
         return [randint(0, 255), randint(0, 255), randint(0, 255), randint(0, 255)]
 
@@ -203,28 +201,35 @@ class CTAPHIDDevice:
         else:
             self.handle_cancel(channel, b"")
 
-    def get_pcsc_device(self, channel_id: Sequence[int]) -> Optional[CtapDevice]:
+    def get_pcsc_device(self, channel_id: List[int]) -> Optional[CtapDevice]:
         """Grab a PC/SC device from python-fido2."""
-        channel_key = self.get_channel_key(channel_id)
-
-        if channel_key not in self.channels_to_devices:
+        if self.chosen_device is None:
             start_time = time.time()
             while time.time() < start_time + SECONDS_TO_WAIT_FOR_AUTHENTICATOR:
+                logging.info("WAITING FOR NEW DEVICE")
                 devices = list(CtapPcscDevice.list_devices())
                 if len(devices) == 0:
                     time.sleep(0.1)
                     continue
                 device = devices[0]
-                self.channels_to_devices[channel_key] = device
+                self.chosen_device = device
+
+                fido2.pcsc.logger.setLevel(0)
+                fido2.pcsc.logger.disabled = False
+                fido2.pcsc.logger.isEnabledFor = lambda x: True
+                fido2.pcsc.logger.manager.disable = 0
+                # fido2.pcsc.logger.addHandler(LogPrintHandler())
+                fido2.pcsc.logger._cache = {}
+
                 return device
             # TODO: send timeout error properly
             raise ValueError("Could not connect to a PC/SC device in time!")
             # self.send_error(channel_id, 0x05)
             # return None
 
-        return self.channels_to_devices[channel_key]
+        return self.chosen_device
 
-    def handle_cbor(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
+    def handle_cbor(self, channel: List[int], buffer: bytes) -> Optional[bytes]:
         """Handling an incoming CBOR command."""
         ctap = self.get_pcsc_device(channel)
         if ctap is None:
@@ -237,19 +242,17 @@ class CTAPHIDDevice:
             logging.info(f"Got CTAP error response from device: {e}")
             return bytes([e.code])
 
-    def handle_cancel(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
+    def handle_cancel(self, channel: List[int], buffer: bytes) -> Optional[bytes]:
         channel_key = self.get_channel_key(channel)
         if channel_key in self.channels_to_state:
             del self.channels_to_state[channel_key]
-        if channel_key in self.channels_to_devices:
-            del self.channels_to_devices[channel_key]
         return bytes()
 
-    def handle_wink(channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
+    def handle_wink(self, channel: List[int], buffer: bytes) -> Optional[bytes]:
         """Do nothing; this can't be done over PC/SC."""
         return bytes()
 
-    def handle_msg(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
+    def handle_msg(self, channel: List[int], buffer: bytes) -> Optional[bytes]:
         """Process a U2F/CTAP1 message."""
         device = self.get_pcsc_device(channel)
         if device is None:
@@ -257,23 +260,21 @@ class CTAPHIDDevice:
         res = device.call(CTAPHID.MSG, buffer)
         return res
 
-    def handle_ping(self, channel: Sequence[int], buffer: bytes) -> Optional[bytes]:
+    def handle_ping(self, channel: List[int], buffer: bytes) -> Optional[bytes]:
         """Handle an echo request."""
         return buffer
 
-    def handle_keepalive(
-        self, channel: Sequence[int], buffer: bytes
-    ) -> Optional[bytes]:
+    def handle_keepalive(self, channel: List[int], buffer: bytes) -> Optional[bytes]:
         """Placeholder: always returns that the device is processing."""
         return bytes([1])
 
     def encode_response_packets(
         self,
-        channel: Sequence[int],
+        channel: List[int],
         cmd: CommandType,
         data: bytes,
         packet_size: int = 64,
-    ) -> Sequence[bytes]:
+    ) -> List[bytes]:
         """Chunk response data to be delivered over USB."""
         offset_start = 0
         seq = 0
@@ -304,17 +305,17 @@ class CTAPHIDDevice:
 
         return responses
 
-    def get_channel_key(self, channel: Sequence[int]) -> str:
+    def get_channel_key(self, channel: List[int]) -> str:
         return bytes(channel).hex()
 
-    def send_error(self, channel: Sequence[int], error_type: int) -> None:
+    def send_error(self, channel: List[int], error_type: int) -> None:
         responses = self.encode_response_packets(
             channel, CommandType.ERROR, bytes([error_type])
         )
         for response in responses:
             self.device.send_input(response)
 
-    def finish_receiving(self, channel: Sequence[int]) -> None:
+    def finish_receiving(self, channel: List[int]) -> None:
         """When finished receiving packets, act on them."""
         channel_key = self.get_channel_key(channel)
         cmd, _, _, data = self.channels_to_state[channel_key]
