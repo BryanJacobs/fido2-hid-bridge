@@ -335,6 +335,7 @@ class CTAPHIDDevice:
         except Exception as e:
             logging.warning(f"Error: {e}")
             self.send_error(channel, 0x7F)
+            self.chosen_device = None
             return
 
         for response in responses:
