@@ -115,6 +115,7 @@ class CTAPHIDDevice:
         if self.reference_count == 0:
             # Clear all state
             self.channels_to_state = {}
+            self.chosen_device = None
 
     def process_hid_message(self, buffer: List[int], report_type: _ReportType) -> None:
         """Core method: handle incoming HID messages."""
