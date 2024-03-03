@@ -25,7 +25,7 @@ And then launch the application in the created virtualenv. You might need to be 
 or otherwise get access to raw HID devices (permissions on `/dev/uhid`):
 
 ```shell
-sudo -E ./.venv/bin/python bridge.py
+sudo -E ./.venv/bin/fido2-hid-bridge
 ```
 
 ## Implementation Details
