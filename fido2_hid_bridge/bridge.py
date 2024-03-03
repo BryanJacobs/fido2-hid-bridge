@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import argparse
 
 from fido2_hid_bridge.ctap_hid_device import CTAPHIDDevice
 
@@ -13,11 +14,13 @@ async def run_device() -> None:
     await device.start()
 
 
-def main(log_level: int = logging.INFO):
-    logging.basicConfig(level=log_level)
+def main():
+    parser = argparse.ArgumentParser(description='Relay USB-HID packets to PC/SC', allow_abbrev=False)
+    parser.add_argument('--debug', action='store_const', const=logging.DEBUG, default=logging.INFO, 
+                        help='Enable debug messages')
+    args = parser.parse_args()
+    logging.basicConfig(level=args.debug)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(run_device())
     loop.run_forever()
 
-if __name__ == '__main__':
-    main(logging.DEBUG)
