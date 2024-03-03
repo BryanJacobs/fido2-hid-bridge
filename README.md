@@ -28,6 +28,22 @@ or otherwise get access to raw HID devices (permissions on `/dev/uhid`):
 sudo -E ./.venv/bin/fido2-hid-bridge
 ```
 
+## Alternative installation
+
+You can also install the project via pipx
+
+```shell
+pipx install git+https://github.com/BryanJacobs/fido2-hid-bridge
+```
+
+The argument '--system-site-packages' is advised when you already have installed python dependecies system wide (e.g. pyscard).
+
+Assuming pipx is configured correctly simply lauch:
+
+```shell
+sudo -E fido2-hid-bridge
+```
+
 ## Implementation Details
 
 This uses the Linux kernel UHID device facility, and the `python-fido2` library.
