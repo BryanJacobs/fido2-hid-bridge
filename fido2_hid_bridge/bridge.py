@@ -13,8 +13,11 @@ async def run_device() -> None:
     await device.start()
 
 
-if __name__ == '__main__':
+def main():
     logging.basicConfig(level=logging.DEBUG)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(run_device())
     loop.run_forever()
+
+if __name__ == '__main__':
+    main()
