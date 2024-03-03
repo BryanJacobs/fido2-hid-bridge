@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from ctap_hid_device import CTAPHIDDevice
+from fido2_hid_bridge.ctap_hid_device import CTAPHIDDevice
 
 
 async def run_device() -> None:
