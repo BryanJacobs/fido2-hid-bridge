@@ -5,7 +5,7 @@ Requires=pcscd.service
 
 [Service]
 WorkingDirectory=/opt/fido2-hid-bridge
-ExecStart=/opt/fido2-hid-bridge/.venv/bin/python bridge.py
+ExecStart=/opt/fido2-hid-bridge/.venv/bin/fido2-hid-bridge
 Type=simple
 Restart=on-failure
 RestartSec=60s
