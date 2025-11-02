@@ -7,6 +7,8 @@ from typing import Optional, Callable, Dict, Tuple, List
 from uhid import UHIDDevice, _ReportType, AsyncioBlockingUHID, Bus
 import fido2
 from fido2.pcsc import CtapDevice, CTAPHID, CtapError, CtapPcscDevice
+from smartcard.pcsc.PCSCContext import PCSCContext
+from smartcard.scard import SCardReleaseContext
 
 SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 10
 """How long, in seconds, to poll for a USB authenticator before giving up."""
@@ -107,6 +109,29 @@ class CTAPHIDDevice:
         self.device.receive_close = self.process_close
         self.device.receive_open = self.process_open
 
+    def _close_pcsc_connection(self):
+        """Close the PCSC connection if it exists."""
+        if self.chosen_device is not None:
+            try:
+                # Close the device connection
+                if hasattr(self.chosen_device, 'close'):
+                    logging.info("CLOSED DEVICE CONNECTION")
+                    self.chosen_device.close()
+
+                # Release the PCSC context handle (actually closes the socket)
+                if PCSCContext.instance is not None:
+                    ctx = PCSCContext.instance
+                    if hasattr(ctx, 'hcontext') and ctx.hcontext is not None:
+                        SCardReleaseContext(ctx.hcontext)
+                        ctx.hcontext = None
+                    PCSCContext.instance = None
+                    logging.info("CLOSED PCSC CONNECTION")
+
+            except Exception as e:
+                logging.warning(f"Failed to close PCSC connection: {e}")
+            finally:
+                self.chosen_device = None
+
     def process_open(self):
         self.reference_count += 1
 
@@ -115,7 +140,7 @@ class CTAPHIDDevice:
         if self.reference_count == 0:
             # Clear all state
             self.channels_to_state = {}
-            self.chosen_device = None
+            self._close_pcsc_connection()
 
     def process_hid_message(self, buffer: List[int], report_type: _ReportType) -> None:
         """Core method: handle incoming HID messages."""
@@ -336,7 +361,7 @@ class CTAPHIDDevice:
         except Exception as e:
             logging.warning(f"Error: {e}")
             self.send_error(channel, 0x7F)
-            self.chosen_device = None
+            self._close_pcsc_connection()
             return
 
         for response in responses:
