@@ -1,0 +1,16 @@
+[Unit]
+Description=FIDO2 HID Bridge for NFC tokens (Immutable OS User Service)
+Documentation=https://github.com/BryanJacobs/fido2-hid-bridge
+After=pcscd.service
+Wants=pcscd.service
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/python3 -m fido2_hid_bridge
+WorkingDirectory=%h/Projects/fido2-hid-bridge
+Environment="PYTHONPATH=%h/Projects/fido2-hid-bridge"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

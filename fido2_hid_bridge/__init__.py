@@ -1,0 +1,1 @@
+"""FIDO2 HID Bridge for PC/SC authenticators."""
