@@ -4,6 +4,7 @@ import asyncio
 import logging
 import argparse
 import signal
+from functools import partial
 
 from fido2_hid_bridge.ctap_hid_device import CTAPHIDDevice
 
@@ -24,7 +25,7 @@ async def run_device() -> None:
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(sig, lambda s=sig: signal_handler(s))
+            loop.add_signal_handler(sig, partial(signal_handler, sig))
         except NotImplementedError:
             pass
 
