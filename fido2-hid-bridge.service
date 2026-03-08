@@ -4,6 +4,7 @@ After=auditd.service syslog.target network.target local-fs.target pcscd.service
 Requires=pcscd.service
 
 [Service]
+Environment=PYTHONUNBUFFERED=true
 WorkingDirectory=/opt/fido2-hid-bridge
 ExecStart=/opt/fido2-hid-bridge/.venv/bin/fido2-hid-bridge
 Type=notify
