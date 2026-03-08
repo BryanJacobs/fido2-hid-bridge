@@ -3,6 +3,9 @@
 import asyncio
 import logging
 import argparse
+import sd_notify
+import signal
+from functools import partial
 
 from fido2_hid_bridge.ctap_hid_device import CTAPHIDDevice
 
@@ -13,6 +16,32 @@ async def run_device() -> None:
 
     await device.start()
 
+    stop_event = asyncio.Event()
+
+    def signal_handler(sig):
+        logging.info(f"Received signal {sig.name}, shutting down...")
+        stop_event.set()
+
+    loop = asyncio.get_running_loop()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, partial(signal_handler, sig))
+        except NotImplementedError:
+            pass
+
+    logging.info("FIDO2 HID Bridge started successfully")
+    
+    # Notify systemd, if it's enabled
+    notify = sd_notify.Notifier()
+    if notify.enabled():
+        notify.ready()
+
+
+    await stop_event.wait()
+
+    logging.info("FIDO2 HID Bridge shutting down...")
+
 
 def main():
     parser = argparse.ArgumentParser(description='Relay USB-HID packets to PC/SC', allow_abbrev=False)
@@ -20,8 +49,6 @@ def main():
                         help='Enable debug messages')
     args = parser.parse_args()
     logging.basicConfig(level=args.debug)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_device())
-    loop.run_forever()
+    
+    asyncio.run(run_device())
 
