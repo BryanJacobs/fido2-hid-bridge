@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import argparse
+import sd_notify
 import signal
 from functools import partial
 
@@ -31,15 +32,11 @@ async def run_device() -> None:
 
     logging.info("FIDO2 HID Bridge started successfully")
     
-    # Notify systemd, if possible
-    try:
-        import sd_notify
-        notify = sd_notify.Notifier()
-        if notify.enabled():
-            notify.ready()
-            logging.info("Notified systemd: service is ready")
-    except ImportError:
-        pass
+    # Notify systemd, if it's enabled
+    notify = sd_notify.Notifier()
+    if notify.enabled():
+        notify.ready()
+
 
     await stop_event.wait()
 
