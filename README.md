@@ -50,3 +50,25 @@ This uses the Linux kernel UHID device facility, and the `python-fido2` library.
 It relays USB-HID packets to PC/SC.
 
 Nothing more to it than that.
+
+## Create AppImage
+
+Install the build tool:
+
+```shell
+pip install appimage
+```
+
+Then build the AppImage:
+
+```shell
+python -m appimage.build
+```
+
+The output is written to `dist/fido2-hid-bridge-x86_64.AppImage`.
+
+Run it the same way as the virtualenv entry point:
+
+```shell
+sudo -E ./dist/fido2-hid-bridge-x86_64.AppImage
+```

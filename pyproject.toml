@@ -6,6 +6,20 @@ authors = ["Bryan Jacobs <b@q3q.us>"]
 readme = "README.md"
 packages = [{include = "fido2_hid_bridge"}]
 
+[project]
+name = "fido2-hid-bridge"
+version = "0.1.0"
+description = "Bridge a Linux virtual USB-HID FIDO2 device to a PC/SC authenticator"
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Bryan Jacobs", email = "b@q3q.us"},
+]
+
+[project.scripts]
+fido2-hid-bridge = "fido2_hid_bridge.bridge:main"
+
 [tool.poetry.dependencies]
 python = "^3.12"
 uhid = "^0.0.1"
@@ -14,6 +28,11 @@ pyscard = "2.3.1"
 
 [tool.poetry.scripts]
 fido2-hid-bridge = 'fido2_hid_bridge.bridge:main'
+
+[tool.appimage.build]
+app = "fido2-hid-bridge"
+packages = ["appimage"]
+python_date = "20260211"
 
 [build-system]
 requires = ["poetry-core"]
