@@ -210,7 +210,13 @@ class CTAPHIDDevice:
 
     def assign_channel_id(self) -> List[int]:
         """Create a new, random, channel ID."""
-        return [randint(0, 255), randint(0, 255), randint(0, 255), randint(0, 255)]
+        while True:
+            cid = [randint(0, 255) for _ in range(4)]
+            if bytes(cid) in (b"\x00\x00\x00\x00", BROADCAST_CHANNEL):
+                continue
+            if self.get_channel_key(cid) in self.channels_to_state:
+                continue
+            return cid
 
     def handle_init(self, channel: bytes, buffer: bytes) -> Optional[bytes]:
         """Initialize or re-initialize a channel."""
