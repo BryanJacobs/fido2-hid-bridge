@@ -222,11 +222,11 @@ class CTAPHIDDevice:
         """Initialize or re-initialize a channel."""
         logging.debug(f"INIT on channel {channel}")
 
-        if channel == BROADCAST_CHANNEL:
-            if len(buffer) != 8:
-                self.send_error(BROADCAST_CHANNEL, 0x03)
-                return None
+        if len(buffer) != 8:
+            self.send_error(BROADCAST_CHANNEL, 0x03)
+            return None
 
+        if channel == BROADCAST_CHANNEL:
             new_channel = self.assign_channel_id()
 
             ctap = self.get_pcsc_device(new_channel)
@@ -246,6 +246,10 @@ class CTAPHIDDevice:
             )
         else:
             self.handle_cancel(channel, b"")
+            ctap = self.get_pcsc_device(list(channel))
+            if ctap is None:
+                return None
+            return bytes([*buffer, *channel, 0x02, 0x01, 0x00, 0x00, ctap.capabilities])
 
     def get_pcsc_device(self, channel_id: List[int]) -> Optional[CtapDevice]:
         """Grab a PC/SC device from python-fido2."""
