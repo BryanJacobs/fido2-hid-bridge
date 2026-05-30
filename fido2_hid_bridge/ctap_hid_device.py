@@ -153,11 +153,16 @@ class CTAPHIDDevice:
         logging.debug(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
 
         if self.is_initial_packet(recvd_bytes):
-            channel, lc, cmd, data = self.parse_initial_packet(recvd_bytes)
+            channel, lc, cmd_byte, data = self.parse_initial_packet(recvd_bytes)
             if lc > MAX_MESSAGE_SIZE:
                 self.send_error(channel, 0x03)
                 return
             channel_key = self.get_channel_key(channel)
+            try:
+                cmd = CommandType(cmd_byte)
+            except ValueError:
+                self.send_error(channel, 0x01)
+                return
             logging.debug(
                 f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}"
             )
@@ -195,8 +200,7 @@ class CTAPHIDDevice:
         cmd_byte = buffer[5] & 0x7F
         lc = (int(buffer[6]) << 8) + buffer[7]
         data = buffer[8 : 8 + lc]
-        cmd = CommandType(cmd_byte)
-        return channel, lc, cmd, data
+        return channel, lc, cmd_byte, data
 
     def is_initial_packet(self, buffer: bytes) -> bool:
         """Return true if packet is the start of a new sequence."""
