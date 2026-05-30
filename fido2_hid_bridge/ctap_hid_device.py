@@ -310,7 +310,9 @@ class CTAPHIDDevice:
         offset_start = 0
         seq = 0
         responses = []
-        while offset_start < len(data):
+        first = True
+        while first or offset_start < len(data):
+            first = False
             if seq == 0:
                 capacity = packet_size - 7
                 chunk = data[offset_start : (offset_start + capacity)]
