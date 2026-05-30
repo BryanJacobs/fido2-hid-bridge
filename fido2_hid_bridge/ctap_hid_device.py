@@ -23,6 +23,8 @@ PID = 0x9999
 """USB product ID."""
 MAX_INFLIGHT_CHANNELS = 64
 """Maximum number of concurrent connections to allow"""
+TRANSACTION_TIMEOUT = 3.0
+"""Timeout in seconds before dropping an incomplete multi-packet transfer"""
 
 BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 """Standard CTAP-HID broadcast channel."""
@@ -53,7 +55,7 @@ class CTAPHIDDevice:
     """Underlying UHID device."""
     chosen_device: Optional[CtapDevice] = None
     """Mapping from channel strings to CTAP devices."""
-    channels_to_state: Dict[str, Tuple[CommandType, int, int, bytes]] = {}
+    channels_to_state: Dict[str, Tuple[CommandType, int, int, bytes, float]] = {}
     """
     Mapping from channel strings to receive buffer state.
 
@@ -152,6 +154,11 @@ class CTAPHIDDevice:
 
     def process_hid_message(self, buffer: List[int], report_type: _ReportType) -> None:
         """Core method: handle incoming HID messages."""
+        now = time.time()
+        stale = [k for k, v in self.channels_to_state.items() if now - v[4] > TRANSACTION_TIMEOUT]
+        for k in stale:
+            del self.channels_to_state[k]
+
         recvd_bytes = bytes(buffer)
         logging.debug(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
 
@@ -172,7 +179,7 @@ class CTAPHIDDevice:
             logging.debug(
                 f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}"
             )
-            self.channels_to_state[channel_key] = cmd, lc, -1, data
+            self.channels_to_state[channel_key] = cmd, lc, -1, data, time.time()
             if lc == len(data):
                 # Complete receive
                 self.finish_receiving(channel)
@@ -182,14 +189,14 @@ class CTAPHIDDevice:
             if channel_key not in self.channels_to_state:
                 self.send_error(channel, 0x0B)
                 return
-            cmd, lc, prev_seq, existing_data = self.channels_to_state[channel_key]
+            cmd, lc, prev_seq, existing_data, _ = self.channels_to_state[channel_key]
             if seq != prev_seq + 1:
                 self.handle_cancel(channel, b"")
                 self.send_error(channel, 0x04)
                 return
             remaining = lc - len(existing_data)
             data = existing_data + new_data[:remaining]
-            self.channels_to_state[channel_key] = cmd, lc, seq, data
+            self.channels_to_state[channel_key] = cmd, lc, seq, data, time.time()
             logging.debug(f"After receive, we have {len(data)} bytes out of {lc}")
             if lc == len(data):
                 self.finish_receiving(channel)
@@ -369,7 +376,7 @@ class CTAPHIDDevice:
     def finish_receiving(self, channel: List[int]) -> None:
         """When finished receiving packets, act on them."""
         channel_key = self.get_channel_key(channel)
-        cmd, _, _, data = self.channels_to_state[channel_key]
+        cmd, _, _, data, _ = self.channels_to_state[channel_key]
         self.handle_cancel(channel, b"")
 
         try:
