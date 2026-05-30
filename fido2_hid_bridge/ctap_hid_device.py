@@ -13,6 +13,8 @@ except:
     PCSCContext = None
 from smartcard.scard import SCardReleaseContext
 
+MAX_MESSAGE_SIZE = 7609
+"""CTAP-HID max payload size"""
 SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 10
 """How long, in seconds, to poll for a USB authenticator before giving up."""
 VID = 0x9999
@@ -152,6 +154,9 @@ class CTAPHIDDevice:
 
         if self.is_initial_packet(recvd_bytes):
             channel, lc, cmd, data = self.parse_initial_packet(recvd_bytes)
+            if lc > MAX_MESSAGE_SIZE:
+                self.send_error(channel, 0x03)
+                return
             channel_key = self.get_channel_key(channel)
             logging.debug(
                 f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}"
