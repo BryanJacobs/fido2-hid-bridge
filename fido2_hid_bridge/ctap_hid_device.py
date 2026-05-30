@@ -21,6 +21,8 @@ VID = 0x9999
 """USB vendor ID."""
 PID = 0x9999
 """USB product ID."""
+MAX_INFLIGHT_CHANNELS = 64
+"""Maximum number of concurrent connections to allow"""
 
 BROADCAST_CHANNEL = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 """Standard CTAP-HID broadcast channel."""
@@ -159,6 +161,9 @@ class CTAPHIDDevice:
                 self.send_error(channel, 0x03)
                 return
             channel_key = self.get_channel_key(channel)
+            if channel_key not in self.channels_to_state and len(self.channels_to_state) >= MAX_INFLIGHT_CHANNELS:
+                self.send_error(channel, 0x06)
+                return
             try:
                 cmd = CommandType(cmd_byte)
             except ValueError:
