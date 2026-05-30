@@ -243,13 +243,6 @@ class CTAPHIDDevice:
                 device = devices[0]
                 self.chosen_device = device
 
-                fido2.pcsc.logger.setLevel(0)
-                fido2.pcsc.logger.disabled = False
-                fido2.pcsc.logger.isEnabledFor = lambda x: True
-                fido2.pcsc.logger.manager.disable = 0
-                # fido2.pcsc.logger.addHandler(LogPrintHandler())
-                fido2.pcsc.logger._cache = {}
-
                 return device
             # TODO: send timeout error properly
             raise ValueError("Could not connect to a PC/SC device in time!")
