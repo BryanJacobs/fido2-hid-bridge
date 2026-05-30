@@ -141,7 +141,8 @@ class CTAPHIDDevice:
         self.reference_count += 1
 
     def process_close(self):
-        self.reference_count -= 1
+        if self.reference_count > 0:
+            self.reference_count -= 1
         if self.reference_count == 0:
             # Clear all state
             self.channels_to_state = {}
