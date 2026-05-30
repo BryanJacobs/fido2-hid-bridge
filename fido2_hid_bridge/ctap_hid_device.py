@@ -217,7 +217,9 @@ class CTAPHIDDevice:
         logging.debug(f"INIT on channel {channel}")
 
         if channel == BROADCAST_CHANNEL:
-            assert len(buffer) == 8
+            if len(buffer) != 8:
+                self.send_error(BROADCAST_CHANNEL, 0x03)
+                return None
 
             new_channel = self.assign_channel_id()
 
