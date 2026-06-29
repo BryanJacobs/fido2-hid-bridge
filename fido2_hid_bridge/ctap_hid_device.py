@@ -15,6 +15,10 @@ from smartcard.scard import SCardReleaseContext
 
 SECONDS_TO_WAIT_FOR_AUTHENTICATOR = 10
 """How long, in seconds, to poll for a USB authenticator before giving up."""
+MAX_SIMULTANEOUS_CONNECTIONS = 100
+"""How many simultaneous connections to allow open at one time."""
+INACTIVITY_CLEANUP_SECONDS = 30.0
+"""How many seconds a connection is allowed to remain idle before being closed."""
 VID = 0x9999
 """USB vendor ID."""
 PID = 0x9999
@@ -49,7 +53,7 @@ class CTAPHIDDevice:
     """Underlying UHID device."""
     chosen_device: Optional[CtapDevice] = None
     """Mapping from channel strings to CTAP devices."""
-    channels_to_state: Dict[str, Tuple[CommandType, int, int, bytes]] = {}
+    channels_to_state: Dict[str, Tuple[CommandType, int, int, bytes, float]] = {}
     """
     Mapping from channel strings to receive buffer state.
 
@@ -139,7 +143,8 @@ class CTAPHIDDevice:
         self.reference_count += 1
 
     def process_close(self):
-        self.reference_count -= 1
+        if self.reference_count > 0:
+            self.reference_count -= 1
         if self.reference_count == 0:
             # Clear all state
             self.channels_to_state = {}
@@ -150,13 +155,24 @@ class CTAPHIDDevice:
         recvd_bytes = bytes(buffer)
         logging.debug(f"GOT MESSAGE (type {report_type}): {recvd_bytes.hex()}")
 
+        now = time.time()
+        stale_channels = set()
+        for channel, data in self.channels_to_state.items():
+            if now - data[4] >= INACTIVITY_CLEANUP_SECONDS:
+                stale_channels.add(channel)
+        for channel in stale_channels:
+            del self.channels_to_state[channel]
+
         if self.is_initial_packet(recvd_bytes):
-            channel, lc, cmd, data = self.parse_initial_packet(recvd_bytes)
+            packet_or_none = self.parse_initial_packet(recvd_bytes)
+            if packet_or_none is None:
+                return
+            channel, lc, cmd, data = packet_or_none
             channel_key = self.get_channel_key(channel)
             logging.debug(
                 f"CMD {cmd.name} CHANNEL {channel_key} len {lc} (recvd {len(data)}) data {data.hex()}"
             )
-            self.channels_to_state[channel_key] = cmd, lc, -1, data
+            self.channels_to_state[channel_key] = cmd, lc, -1, data, now
             if lc == len(data):
                 # Complete receive
                 self.finish_receiving(channel)
@@ -166,14 +182,14 @@ class CTAPHIDDevice:
             if channel_key not in self.channels_to_state:
                 self.send_error(channel, 0x0B)
                 return
-            cmd, lc, prev_seq, existing_data = self.channels_to_state[channel_key]
+            cmd, lc, prev_seq, existing_data, _ = self.channels_to_state[channel_key]
             if seq != prev_seq + 1:
                 self.handle_cancel(channel, b"")
                 self.send_error(channel, 0x04)
                 return
             remaining = lc - len(existing_data)
             data = existing_data + new_data[:remaining]
-            self.channels_to_state[channel_key] = cmd, lc, seq, data
+            self.channels_to_state[channel_key] = cmd, lc, seq, data, now
             logging.debug(f"After receive, we have {len(data)} bytes out of {lc}")
             if lc == len(data):
                 self.finish_receiving(channel)
@@ -183,14 +199,18 @@ class CTAPHIDDevice:
 
     def parse_initial_packet(
         self, buffer: bytes
-    ) -> Tuple[bytes, int, CommandType, bytes]:
+    ) -> Optional[Tuple[bytes, int, CommandType, bytes]]:
         """Parse an incoming initial packet."""
         logging.debug(f"Initial packet {buffer.hex()}")
         channel = buffer[1:5]
         cmd_byte = buffer[5] & 0x7F
         lc = (int(buffer[6]) << 8) + buffer[7]
         data = buffer[8 : 8 + lc]
-        cmd = CommandType(cmd_byte)
+        try:
+            cmd = CommandType(cmd_byte)
+        except ValueError:
+            send.send_error(channel, 0x01)
+            return None
         return channel, lc, cmd, data
 
     def is_initial_packet(self, buffer: bytes) -> bool:
@@ -201,34 +221,51 @@ class CTAPHIDDevice:
 
     def assign_channel_id(self) -> List[int]:
         """Create a new, random, channel ID."""
-        return [randint(0, 255), randint(0, 255), randint(0, 255), randint(0, 255)]
+        for _ in range(10):
+            cid = [randint(0, 255) for _ in range(4)]
+            if bytes(cid) in (b"\x00\x00\x00\x00", BROADCAST_CHANNEL):
+                continue
+            if self.get_channel_key(cid) in self.channels_to_state:
+                continue
+            return cid
+        raise ValueError("Unable to assign an unused channel ID!")
 
     def handle_init(self, channel: bytes, buffer: bytes) -> Optional[bytes]:
         """Initialize or re-initialize a channel."""
         logging.debug(f"INIT on channel {channel}")
 
+        if len(buffer) != 8:
+            self.send_error(BROADCAST_CHANNEL, 0x03)
+            return None
+
         if channel == BROADCAST_CHANNEL:
-            assert len(buffer) == 8
+            if len(self.channels_to_state) > MAX_SIMULTANEOUS_CONNECTIONS:
+                self.send_error(channel, 0x06)
+                return None
 
             new_channel = self.assign_channel_id()
 
             ctap = self.get_pcsc_device(new_channel)
             if ctap is None:
                 return None
-
-            return bytes(
-                [x for x in buffer]
-                + [x for x in new_channel]
-                + [
-                    0x02,  # protocol version
-                    0x01,  # device version major
-                    0x00,  # device version minor
-                    0x00,  # device version build/point
-                    ctap.capabilities,  # capabilities, from the underlying device
-                ]
-            )
         else:
             self.handle_cancel(channel, b"")
+            ctap = self.get_pcsc_device(list(channel))
+            if ctap is None:
+                return None
+            new_channel = channel
+
+        return bytes(
+            [_ for _ in buffer]
+            + [_ for _ in new_channel]
+            + [
+                0x02,  # protocol version
+                0x01,  # device version major
+                0x00,  # device version minor
+                0x00,  # device version build/point
+                ctap.capabilities,  # capabilities, from the underlying device
+            ]
+        )
 
     def get_pcsc_device(self, channel_id: List[int]) -> Optional[CtapDevice]:
         """Grab a PC/SC device from python-fido2."""
@@ -308,7 +345,7 @@ class CTAPHIDDevice:
         offset_start = 0
         seq = 0
         responses = []
-        while offset_start < len(data):
+        while True:
             if seq == 0:
                 capacity = packet_size - 7
                 chunk = data[offset_start : (offset_start + capacity)]
@@ -332,6 +369,9 @@ class CTAPHIDDevice:
             offset_start += capacity
             seq += 1
 
+            if offset_start >= len(data):
+                break
+
         return responses
 
     def get_channel_key(self, channel: List[int]) -> str:
@@ -347,7 +387,7 @@ class CTAPHIDDevice:
     def finish_receiving(self, channel: List[int]) -> None:
         """When finished receiving packets, act on them."""
         channel_key = self.get_channel_key(channel)
-        cmd, _, _, data = self.channels_to_state[channel_key]
+        cmd, _, _, data, _ = self.channels_to_state[channel_key]
         self.handle_cancel(channel, b"")
 
         try:
