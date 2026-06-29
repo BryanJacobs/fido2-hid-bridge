@@ -7,13 +7,15 @@ readme = "README.md"
 packages = [{include = "fido2_hid_bridge"}]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.12,<3.16"
 uhid = "^0.0.1"
 fido2 = {extras = ["pcsc"], version = "^2.0.0"}
 pyscard = "2.3.1"
+pyinstaller = "^6.21.0"
 
 [tool.poetry.scripts]
 fido2-hid-bridge = 'fido2_hid_bridge.bridge:main'
+package = 'package:build'
 
 [build-system]
 requires = ["poetry-core"]

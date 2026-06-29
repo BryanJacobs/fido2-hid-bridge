@@ -13,7 +13,7 @@ you can use NFC authenticators or Smartcards.
 Note that this is a very early-stage application, but it does work with
 Chrome and Firefox.
 
-## Running It
+## Setup
 
 You'll need to install dependencies:
 
@@ -21,27 +21,17 @@ You'll need to install dependencies:
 poetry install
 ```
 
-And then launch the application in the created virtualenv. You might need to be root
+And then build the redistributable:
+
+```shell
+poetry run package
+```
+
+This will produce a `dist/fido2-hid-bridge` that you can run. You might need to be root
 or otherwise get access to raw HID devices (permissions on `/dev/uhid`):
 
 ```shell
-sudo -E ./.venv/bin/fido2-hid-bridge
-```
-
-## Alternative installation
-
-You can also install the project via pipx
-
-```shell
-pipx install git+https://github.com/BryanJacobs/fido2-hid-bridge
-```
-
-The argument '--system-site-packages' is advised when you already have installed python dependecies system wide (e.g. pyscard).
-
-Assuming pipx is configured correctly simply lauch:
-
-```shell
-sudo -E fido2-hid-bridge
+sudo -E ./dist/fido2-hid-bridge
 ```
 
 ## Implementation Details
