@@ -10,9 +10,6 @@ This allows using authenticators over PC/SC from applications
 that only support USB-HID, such as Firefox; with this program running
 you can use NFC authenticators or Smartcards.
 
-Note that this is a very early-stage application, but it does work with
-Chrome and Firefox.
-
 ## Setup
 
 You'll need to install dependencies:
